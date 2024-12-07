@@ -118,11 +118,12 @@ resource "aws_route_table" "new_york_route_table_private_subnet" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_nat_gateway.new_york_nat_gateway.id
   }
+  /*
   route {
     cidr_block = "10.230.0.0/16"
     transit_gateway_id = aws_ec2_transit_gateway.local.id
   } 
-
+*/
   tags = {
     Name = "Route Table for Private Subnet",
   }

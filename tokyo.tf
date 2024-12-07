@@ -110,6 +110,7 @@ resource "aws_route_table" "tokyo_route_table_private_subnet" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_nat_gateway.tokyo_nat_gateway.id
   }
+  /*
   route {
     cidr_block = "10.231.0.0/16"
     transit_gateway_id = aws_ec2_transit_gateway.peer.id
@@ -118,7 +119,7 @@ resource "aws_route_table" "tokyo_route_table_private_subnet" {
   tags = {
     Name = "Route Table for Private Subnet",
   }
-
+*/
 }
 
 ################################

@@ -13,8 +13,8 @@ resource "aws_ec2_transit_gateway" "local" {
 provider = aws.new_york
   description = "new_york"
   auto_accept_shared_attachments = "enable"
-  default_route_table_association = "enable"
-  default_route_table_propagation = "enable"
+  default_route_table_association = "disable"
+  default_route_table_propagation = "disable"
   dns_support = "enable"
   tags = {
     Name = "new_york TGW"
@@ -25,8 +25,8 @@ resource "aws_ec2_transit_gateway" "peer" {
    provider = aws.tokyo
   description = "tokyo"
   auto_accept_shared_attachments = "enable"
-  default_route_table_association = "enable"
-  default_route_table_propagation = "enable"
+  default_route_table_association = "disable"
+  default_route_table_propagation = "disable"
   dns_support = "enable"
   tags = {
     Name = "tokyo TGW"
@@ -90,30 +90,98 @@ resource "aws_ec2_transit_gateway_peering_attachment_accepter" "spoke_accept" {
   }
 }
 #############################################################
-# TRANSIT GATEWAY ROURES HUB TO SPOKE
+# TRANSIT GATEWAY ROUTE TABLE CONFIGURATION
 #############################################################
-/*
-resource "aws_ec2_transit_gateway_route" "hub_to_spoke_routes" {
-  for_each = toset(var.regions)
 
+# Hub TGW Route Table (Tokyo)
+resource "aws_ec2_transit_gateway_route_table" "hub_route_table" {
+  transit_gateway_id = aws_ec2_transit_gateway.peer.id
+  tags = {
+    Name = "Hub TGW Route Table (Tokyo)"
+  }
+  provider = aws.tokyo
+}
 
-  destination_cidr_block         = aws_vpc.[each.key].cidr_block                     # Spoke VPC CIDR
+# Spoke TGW Route Table (New York)
+resource "aws_ec2_transit_gateway_route_table" "spoke_route_table" {
+  transit_gateway_id = aws_ec2_transit_gateway.local.id
+  tags = {
+    Name = "Spoke TGW Route Table (New York)"
+  }
+  provider = aws.new_york
+}
+
+#############################################################
+# TRANSIT GATEWAY ROUTE TABLE ASSOCIATIONS
+#############################################################
+
+# Associate Hub TGW Route Table with Tokyo VPC Attachment
+resource "aws_ec2_transit_gateway_route_table_association" "hub_tgw_vpc" {
+  transit_gateway_attachment_id = aws_ec2_transit_gateway_vpc_attachment.peer_attachment.id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.hub_route_table.id
+  provider = aws.tokyo
+}
+
+# Associate Spoke TGW Route Table with New York VPC Attachment
+resource "aws_ec2_transit_gateway_route_table_association" "spoke_tgw_vpc" {
+  transit_gateway_attachment_id = aws_ec2_transit_gateway_vpc_attachment.local_attachment.id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.spoke_route_table.id
+  provider = aws.new_york
+}
+
+#############################################################
+# TRANSIT GATEWAY ROUTES
+#############################################################
+
+# Route from Hub TGW to Spoke VPC (Tokyo -> New York)
+resource "aws_ec2_transit_gateway_route" "hub_to_spoke" {
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.hub_route_table.id
+  destination_cidr_block         = aws_vpc.new_york.cidr_block # New York VPC CIDR
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_peering_attachment.hub_to_spoke.id
-  provider                       = aws.tokyo # Hub TGW provider
-}
-resource "aws_ec2_transit_gateway_route" "spoke_to_hub_routes" {
-  #for_each = toset(var.regions)
+  provider                       = aws.tokyo
 
-  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.tgw_routes[each.key].id
-  destination_cidr_block         = aws_vpc.regional_vpcs["tokyo"].cidr_block # Hub VPC CIDR
-  transit_gateway_attachment_id  = aws_ec2_transit_gateway_peering_attachment.hub_to_spoke[each.key].id
-
+  depends_on = [aws_ec2_transit_gateway_vpc_attachment.local_attachment]
 }
-resource "aws_route" "hub_vpc_to_spokes" {
-  for_each = toset(var.regions)
-
-  route_table_id         = aws_vpc_route_table.hub_route_table.id
-  destination_cidr_block = aws_vpc.regional_vpcs[each.key].cidr_block # Spoke VPC CIDR
-  transit_gateway_id     = aws_ec2_transit_gateway.local["tokyo"].id
+# Route from Hub TGW to Tokyo VPC (Tokyo -> Tokyo VPC CIDR)
+resource "aws_ec2_transit_gateway_route" "hub_to_hub_vpc" {
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.hub_route_table.id
+  destination_cidr_block         = aws_vpc.tokyo.cidr_block # Tokyo VPC CIDR
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.peer_attachment.id
+  provider                       = aws.tokyo
 }
-*/
+# Route from Spoke TGW to Hub VPC (New York -> Tokyo)
+resource "aws_ec2_transit_gateway_route" "spoke_to_hub" {
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.spoke_route_table.id
+  destination_cidr_block         = aws_vpc.tokyo.cidr_block # Tokyo VPC CIDR
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_peering_attachment.hub_to_spoke.id
+  provider                       = aws.new_york
+
+  depends_on = [aws_ec2_transit_gateway_vpc_attachment.peer_attachment]
+}
+# Route from Spoke TGW to New York VPC (New York -> New York VPC CIDR)
+resource "aws_ec2_transit_gateway_route" "spoke_to_spoke_vpc" {
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.spoke_route_table.id
+  destination_cidr_block         = aws_vpc.new_york.cidr_block # New York VPC CIDR
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.local_attachment.id
+  provider                       = aws.new_york
+}
+#############################################################
+# VPC ROUTE TABLE CONFIGURATION
+#############################################################
+
+# Route for Hub VPC (Tokyo) to Reach Spoke VPC (New York)
+resource "aws_route" "hub_to_spoke" {
+  route_table_id         = aws_route_table.tokyo_route_table_private_subnet.id
+  destination_cidr_block = aws_vpc.new_york.cidr_block # New York VPC CIDR
+  transit_gateway_id     = aws_ec2_transit_gateway.peer.id
+  provider               = aws.tokyo
+}
+
+# Route for Spoke VPC (New York) to Reach Hub VPC (Tokyo)
+resource "aws_route" "spoke_to_hub" {
+  route_table_id         = aws_route_table.new_york_route_table_public_subnet.id
+  destination_cidr_block = aws_vpc.tokyo.cidr_block # Tokyo VPC CIDR
+  transit_gateway_id     = aws_ec2_transit_gateway.local.id
+  provider               = aws.new_york
+}
+
